@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Gas-in-USDC — an Arc testnet UX demo</title>
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#14181d; --line:#232a32; --txt:#e8edf3; --dim:#93a1b1;
+    --acc:#4ade80; --acc-dim:#16311f; --warn:#fbbf24; --err:#f87171;
+    --r:14px; --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    display:flex;justify-content:center;padding:32px 16px 64px}
+  .wrap{width:100%;max-width:520px}
+  header{margin-bottom:24px}
+  h1{font-size:22px;margin:0 0 6px;letter-spacing:-.02em}
+  .sub{color:var(--dim);font-size:13.5px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:20px;margin-bottom:14px}
+  .row{display:flex;justify-content:space-between;align-items:center;gap:12px}
+  label{display:block;font-size:12.5px;color:var(--dim);margin:0 0 6px;text-transform:uppercase;letter-spacing:.05em}
+  input{width:100%;background:#0e1216;border:1px solid var(--line);color:var(--txt);
+    border-radius:10px;padding:11px 12px;font-family:var(--mono);font-size:13.5px}
+  input:focus{outline:none;border-color:var(--acc)}
+  button{background:var(--acc);color:#06210f;border:0;border-radius:10px;padding:11px 16px;
+    font-weight:650;font-size:14px;cursor:pointer;transition:.15s}
+  button:hover:not(:disabled){filter:brightness(1.08)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button.ghost{background:transparent;border:1px solid var(--line);color:var(--txt);font-weight:500}
+  .bal{font-family:var(--mono);font-size:30px;letter-spacing:-.02em;margin:2px 0 0}
+  .bal small{font-size:14px;color:var(--dim);margin-left:6px}
+  .pill{font-size:11.5px;padding:3px 9px;border-radius:99px;background:var(--acc-dim);
+    color:var(--acc);font-family:var(--mono)}
+  .pill.off{background:#2a1f1f;color:var(--err)}
+  .note{font-size:12.5px;color:var(--dim);margin-top:10px;line-height:1.5}
+  .kv{display:flex;justify-content:space-between;font-family:var(--mono);font-size:12.5px;
+    padding:7px 0;border-bottom:1px dashed var(--line)}
+  .kv:last-child{border-bottom:0}
+  .kv span:first-child{color:var(--dim)}
+  a{color:var(--acc)}
+  .log{font-family:var(--mono);font-size:12px;white-space:pre-wrap;word-break:break-all;
+    color:var(--dim);max-height:150px;overflow:auto}
+  .hl{color:var(--warn)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  footer{color:var(--dim);font-size:12px;text-align:center;margin-top:24px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Gas-in-USDC</h1>
+    <div class="sub">A tiny Arc testnet demo: on Arc, <strong>USDC is the gas token</strong> — so the fee
+      you pay is denominated in the same unit you're sending. This page makes that visible.</div>
+  </header>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <label>Wallet</label>
+        <div id="addr" class="sub" style="font-family:var(--mono)">not connected</div>
+      </div>
+      <span id="net" class="pill off">no network</span>
+    </div>
+    <div class="grid2" style="margin-top:16px">
+      <button id="connect">Connect wallet</button>
+      <button id="addnet" class="ghost">Add Arc testnet</button>
+    </div>
+    <div class="note">Testnet USDC from <a href="https://faucet.circle.com" target="_blank" rel="noopener">faucet.circle.com</a>.
+      Never use a wallet holding real funds for testnets.</div>
+  </div>
+
+  <div class="card">
+    <label>Balance (native = USDC)</label>
+    <div class="bal"><span id="bal">—</span><small>USDC</small></div>
+    <div class="note" id="balnote">Connect to read your balance from Arc testnet.</div>
+  </div>
+
+  <div class="card">
+    <label for="to">Send USDC</label>
+    <input id="to" placeholder="0x… recipient address" spellcheck="false" />
+    <div style="height:10px"></div>
+    <input id="amt" placeholder="0.10" inputmode="decimal" />
+    <div style="height:14px"></div>
+    <div class="grid2">
+      <button id="estimate" class="ghost" disabled>Estimate fee</button>
+      <button id="send" disabled>Send</button>
+    </div>
+    <div id="quote" style="margin-top:14px;display:none">
+      <div class="kv"><span>You send</span><span id="q-amt">—</span></div>
+      <div class="kv"><span>Network fee (USDC)</span><span id="q-fee" class="hl">—</span></div>
+      <div class="kv"><span>Total leaves wallet</span><span id="q-total">—</span></div>
+      <div class="note">Same unit for value and fee — no second volatile asset to hold, and the cost
+        of a transfer is legible to a normal person. That's the UX point of this demo.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="margin-bottom:12px">
+      <label style="margin:0">Read-only lookup</label>
+      <span class="sub" style="font-size:11.5px">no wallet needed</span>
+    </div>
+    <input id="watch" placeholder="0x… any Arc testnet address" spellcheck="false" />
+    <div style="height:10px"></div>
+    <button id="lookup" class="ghost" style="width:100%">Look up balance &amp; current fee</button>
+    <div id="watchout" style="margin-top:12px;display:none">
+      <div class="kv"><span>Balance</span><span id="w-bal">—</span></div>
+      <div class="kv"><span>Fee for a plain transfer</span><span id="w-fee" class="hl">—</span></div>
+      <div class="kv"><span>Same fee at 2 decimals</span><span id="w-fee2">—</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <label>Activity</label>
+    <div id="log" class="log">ready.</div>
+  </div>
+
+  <footer>
+    Arc Testnet · chain 5042002 · <a href="https://testnet.arcscan.app" target="_blank" rel="noopener">arcscan</a><br />
+    Built as a UX experiment by a product designer · testnet only, no real value
+  </footer>
+</div>
+
+<script>
+const ARC = {
+  chainIdHex: '0x4CEF52',              // 5042002
+  chainName: 'Arc Testnet',
+  rpcUrls: ['https://rpc.testnet.arc.io'],
+  nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 18 },
+  blockExplorerUrls: ['https://testnet.arcscan.app'],
+};
+const $ = (id) => document.getElementById(id);
+const logEl = $('log');
+const say = (m) => { logEl.textContent = `${new Date().toLocaleTimeString()}  ${m}\n` + logEl.textContent; };
+const fmt = (wei, dp = 6) => Number(ethers.formatUnits(wei, 18)).toFixed(dp);
+
+let provider, signer, account;
+
+function requireWallet() {
+  if (!window.ethereum) { say('No EVM wallet found. Install MetaMask (or any EIP-1193 wallet).'); return false; }
+  return true;
+}
+
+async function refreshNetwork() {
+  const net = await provider.getNetwork();
+  const onArc = Number(net.chainId) === 5042002;
+  $('net').textContent = onArc ? 'Arc Testnet' : `chain ${net.chainId} (switch)`;
+  $('net').className = 'pill' + (onArc ? '' : ' off');
+  $('estimate').disabled = !onArc;
+  $('send').disabled = !onArc;
+  return onArc;
+}
+
+async function refreshBalance() {
+  if (!account) return;
+  const wei = await provider.getBalance(account);
+  $('bal').textContent = fmt(wei, 4);
+  $('balnote').textContent = wei === 0n
+    ? 'Zero balance — grab testnet USDC from the faucet, then reload.'
+    : 'Native balance on Arc is USDC itself, so this number is both your money and your gas budget.';
+}
+
+$('connect').onclick = async () => {
+  if (!requireWallet()) return;
+  try {
+    provider = new ethers.BrowserProvider(window.ethereum);
+    const accs = await provider.send('eth_requestAccounts', []);
+    account = accs[0];
+    signer = await provider.getSigner();
+    $('addr').textContent = account.slice(0, 6) + '…' + account.slice(-4);
+    say(`connected ${account}`);
+    await refreshNetwork();
+    await refreshBalance();
+    window.ethereum.on?.('chainChanged', () => location.reload());
+    window.ethereum.on?.('accountsChanged', () => location.reload());
+  } catch (e) { say('connect failed: ' + (e.shortMessage || e.message)); }
+};
+
+$('addnet').onclick = async () => {
+  if (!requireWallet()) return;
+  try {
+    await window.ethereum.request({ method: 'wallet_addEthereumChain', params: [ARC] });
+    say('Arc testnet added / switched.');
+    if (provider) { await refreshNetwork(); await refreshBalance(); }
+  } catch (e) { say('addNetwork failed: ' + (e.message || e)); }
+};
+
+async function buildTx() {
+  const to = $('to').value.trim();
+  const amt = $('amt').value.trim();
+  if (!ethers.isAddress(to)) throw new Error('recipient is not a valid address');
+  if (!(Number(amt) > 0)) throw new Error('amount must be greater than zero');
+  return { to, value: ethers.parseUnits(amt, 18) };
+}
+
+$('estimate').onclick = async () => {
+  try {
+    const tx = await buildTx();
+    const [gas, fee] = await Promise.all([
+      provider.estimateGas({ ...tx, from: account }),
+      provider.getFeeData(),
+    ]);
+    const price = fee.maxFeePerGas ?? fee.gasPrice ?? 0n;
+    const cost = gas * price;
+    $('q-amt').textContent = fmt(tx.value) + ' USDC';
+    $('q-fee').textContent = fmt(cost) + ' USDC';
+    $('q-total').textContent = fmt(tx.value + cost) + ' USDC';
+    $('quote').style.display = 'block';
+    say(`estimated: gas ${gas} × ${fmt(price, 12)} = ${fmt(cost)} USDC`);
+  } catch (e) { say('estimate failed: ' + (e.shortMessage || e.message)); }
+};
+
+// 읽기 전용 조회 — 지갑 없이 공용 RPC로 직접 질의
+$('lookup').onclick = async () => {
+  const addr = $('watch').value.trim();
+  if (!ethers.isAddress(addr)) { say('lookup: not a valid address'); return; }
+  try {
+    $('lookup').disabled = true;
+    const ro = new ethers.JsonRpcProvider(ARC.rpcUrls[0], { chainId: 5042002, name: 'arc-testnet' });
+    const [wei, fee] = await Promise.all([ro.getBalance(addr), ro.getFeeData()]);
+    const price = fee.gasPrice ?? fee.maxFeePerGas ?? 0n;
+    const cost = 21000n * price; // 단순 전송 기준
+    $('w-bal').textContent = fmt(wei, 4) + ' USDC';
+    $('w-fee').textContent = fmt(cost) + ' USDC';
+    $('w-fee2').textContent = Number(ethers.formatUnits(cost, 18)).toFixed(2) + ' USDC  ← reads as broken';
+    $('watchout').style.display = 'block';
+    say(`lookup ok · balance ${fmt(wei, 4)} USDC · transfer fee ${fmt(cost)} USDC`);
+  } catch (e) {
+    say('lookup failed: ' + (e.shortMessage || e.message));
+  } finally { $('lookup').disabled = false; }
+};
+
+$('send').onclick = async () => {
+  try {
+    const tx = await buildTx();
+    $('send').disabled = true;
+    say('sending — confirm in your wallet…');
+    const sent = await signer.sendTransaction(tx);
+    say(`submitted ${sent.hash}`);
+    const rec = await sent.wait();
+    const paid = rec.gasUsed * (rec.gasPrice ?? 0n);
+    say(`confirmed in block ${rec.blockNumber} · fee paid ${fmt(paid)} USDC`);
+    say(`explorer: https://testnet.arcscan.app/tx/${sent.hash}`);
+    await refreshBalance();
+  } catch (e) {
+    say('send failed: ' + (e.shortMessage || e.message));
+  } finally { $('send').disabled = false; }
+};
+</script>
+</body>
+</html>
